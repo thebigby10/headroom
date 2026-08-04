@@ -38,6 +38,8 @@
   h1 { font-size: 20px; } h1 small { color: var(--ink-2); font-weight: 400; }
   h2 { font-size: 15px; margin: 28px 0 10px; }
   .muted { color: var(--ink-2); }
+  /* the stricter probe: shaded so it reads as a separate, harder test */
+  .mprobe { background: color-mix(in oklab, var(--ink-2) 8%, transparent); }
   .stats { display: flex; gap: 28px; flex-wrap: wrap; margin: 16px 0; }
   .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
   .stat span { color: var(--ink-2); font-size: 12px; }
@@ -274,19 +276,26 @@ async function drawCmp() {
   const arms = summary.results;
   let rows = "";
   for (const [label, r] of Object.entries(arms)) {
-    const p = t => { const pr = r.probes[t]; if (!pr) return "—";
+    const score = src => t => { const pr = (r[src] || {})[t]; if (!pr) return "—";
       return Object.values(pr).filter(Boolean).length + "/5"; };
+    const p = score("probes"), m = score("probes_model");
     rows += `<tr><td><i class="legend" style="display:inline-block;width:10px;height:10px;
       border-radius:3px;background:${ARM_COLOR[r.arm]};margin-right:6px"></i>
       ${ARM_LABEL[r.arm]}</td><td>${r.turns}</td>
       <td>${p(25)}</td><td>${p(50)}</td><td>${p(100)}</td>
+      <td class="mprobe">${m(25)}</td><td class="mprobe">${m(50)}</td><td class="mprobe">${m(100)}</td>
       <td>${r.avg_sent.toLocaleString()}</td><td>${r.epochs ?? "—"}</td></tr>`;
   }
   $("cmp").innerHTML = `<table>
-    <tr><th>arm</th><th>turns survived</th><th>facts@25</th><th>facts@50</th>
-    <th>facts@100</th><th>avg tokens/turn</th><th>epochs</th></tr>${rows}</table>
+    <tr><th>arm</th><th>turns survived</th>
+    <th colspan="3">facts in context @25/50/100</th>
+    <th colspan="3" class="mprobe">model restated @25/50/100</th>
+    <th>avg tokens/turn</th><th>epochs</th></tr>${rows}</table>
     <p class="muted">Same survival — the difference is what each arm still remembers.
-    Stock spends fidelity when the window is half-empty; Headroom spends it only under pressure.</p>`;
+    Stock spends fidelity when the window is half-empty; Headroom spends it only under pressure.
+    The shaded columns are the stricter test: a forked call asking the live model to restate
+    the constraints, graded on its own reply. Holding a fact in context does not guarantee
+    the model uses it — but an arm that dropped the fact cannot score here at all.</p>`;
 }
 
 $("turnSlider").oninput = e => renderTurn(+e.target.value);

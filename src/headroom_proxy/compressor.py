@@ -1,10 +1,12 @@
-"""Compression backends.
+"""Compression backends, tried in order; every result says which one produced it.
 
-Hosted Paritok when PARITOK_API_KEY is set AND the response proves compression
-happened (gpu_available true, 2xx) — Checkpoint 0 showed a missing/bad key gets
-401 + verbatim passthrough, so success is verified, never assumed.
-Otherwise: deterministic local fallback with distinct L1/L2/L3 behaviour.
-Every result says which backend produced it.
+1. Hosted Paritok — only when the response *proves* compression happened
+   (2xx AND gpu_available AND non-empty). Never assumed: a missing key returns
+   401 + verbatim passthrough, and a *valid* key against a downed GPU returns
+   200 + verbatim passthrough. Both were observed live (results/checkpoint0.md).
+2. Local Paritok 4B via ollama — the self-host path the hosted service itself
+   points at when its GPU is unreachable. Opt-in via PARITOK_OLLAMA_MODEL.
+3. Deterministic local fallback with distinct L1/L2/L3 behaviour.
 """
 
 import os
@@ -13,8 +15,17 @@ import re
 import httpx
 
 PARITOK_ENDPOINT = os.environ.get("PARITOK_ENDPOINT", "https://www.paritok.com/api/compress")
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+# opt-in: the hosted 200-but-uncompressed response names this exact model
+PARITOK_OLLAMA_MODEL = os.environ.get("PARITOK_OLLAMA_MODEL")
 
 LEVELS = ["L0", "L1", "L2", "L3"]
+
+_LEVEL_BRIEF = {
+    "L1": "Remove redundant whitespace, filler and boilerplate. Keep all content.",
+    "L2": "Keep only the parts relevant to the query; drop the rest.",
+    "L3": "Compress hard into a terse summary of a few lines.",
+}
 
 
 def _l1(text: str) -> str:
@@ -63,6 +74,31 @@ def compress_local(text: str, level: str, query: str = "") -> str:
     return _l3(text)
 
 
+def compress_ollama(text: str, level: str, query: str = "") -> str | None:
+    """Paritok's own 4B model, self-hosted. Returns None on any failure so the
+    caller falls through — a compressor that silently returns nothing is worse
+    than one that admits it's unavailable."""
+    prompt = (
+        "You compress context for an LLM. Rewrite the CONTENT below.\n"
+        f"{_LEVEL_BRIEF[level]}\n"
+        "Preserve every identifier, file path, version number, error code and "
+        "quoted string EXACTLY as written. Output only the rewritten content.\n"
+        f"QUERY: {query or '(none)'}\n\nCONTENT:\n{text}"
+    )
+    try:
+        r = httpx.post(
+            f"{OLLAMA_URL}/api/generate",
+            json={"model": PARITOK_OLLAMA_MODEL, "prompt": prompt, "stream": False,
+                  "options": {"temperature": 0}},
+            timeout=300,
+        )
+        if r.status_code >= 300:
+            return None
+        return (r.json().get("response") or "").strip() or None
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
 def compress(text: str, level: str, query: str = "", kind: str = "history") -> tuple[str, str]:
     """Returns (compressed_text, backend_name)."""
     if level == "L0":
@@ -80,5 +116,9 @@ def compress(text: str, level: str, query: str = "", kind: str = "history") -> t
             if r.status_code < 300 and body.get("gpu_available") and body.get("compressed"):
                 return body["compressed"], "paritok-gpu"
         except (httpx.HTTPError, ValueError):
-            pass  # fall through to local
+            pass  # fall through
+    if PARITOK_OLLAMA_MODEL:
+        out = compress_ollama(text, level, query)
+        if out:
+            return out, "paritok-local-4b"
     return compress_local(text, level, query), "local-fallback"
