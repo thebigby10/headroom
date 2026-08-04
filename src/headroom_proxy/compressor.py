@@ -88,9 +88,11 @@ def compress_ollama(text: str, level: str, query: str = "") -> str | None:
     try:
         r = httpx.post(
             f"{OLLAMA_URL}/api/generate",
+            # keep_alive: a cold 3.8GB load costs ~200s and blew the first timeout;
+            # holding the model resident makes repeat calls ~55 tok/s
             json={"model": PARITOK_OLLAMA_MODEL, "prompt": prompt, "stream": False,
-                  "options": {"temperature": 0}},
-            timeout=300,
+                  "keep_alive": "30m", "options": {"temperature": 0}},
+            timeout=600,
         )
         if r.status_code >= 300:
             return None

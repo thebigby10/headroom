@@ -28,9 +28,14 @@ https://claude.ai/code/artifact/0d700201-71e8-4dd1-8f99-0fee2e1fb6d3
 2. **Public demo hosting** if a non-artifact URL is wanted: any static host
    serves `examples/demo.html` as-is (Netlify/Pages drag-and-drop works —
    it's one file).
-3. **Paritok account**: sign up, put the account email in the Devpost form,
-   and set `PARITOK_API_KEY` + rerun `benchmark/run.py` to upgrade the run
-   from the disclosed local fallback to hosted GPU numbers.
+3. **Paritok account**: ~~sign up and set `PARITOK_API_KEY`~~ — **done, and it
+   changed the answer.** The key is valid, but the hosted GPU is down: it
+   returns HTTP 200 with `gpu_available: false` and the input echoed back
+   verbatim at every level. The run therefore stays on the disclosed local
+   fallback, and that is now a *measured* state rather than a missing-key
+   caveat. Still needed from the user: put the Paritok account email in the
+   Devpost form. Re-running against a working GPU is one command if it comes
+   back up (`.venv/bin/python scripts/checkpoint0_probe.py` to check first).
 4. **File the GitHub issue** from `docs/upstream-issue.md` on the Paritok repo
    with tag `hackathon-feedback` (outward-facing — user's call).
 5. **Record the video** from `docs/video-script.md`; post from

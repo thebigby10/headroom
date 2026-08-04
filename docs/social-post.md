@@ -18,8 +18,13 @@
 >
 > [GIF: fact counter holding 5/5 while the baseline drops]
 >
-> Built on @Paritok's hosted compression for #BuiltWithParitok. Repo + live
-> demo + every number traceable to a log row: <repo link>
+> Built for @Paritok's #BuiltWithParitok. Honest caveat: their hosted GPU was
+> down all weekend — it returns HTTP 200 with your text unchanged, so we ran on
+> our own fallback compressor and labeled every affected log row. The policy
+> result stands (all three arms share the backend); no number is credited to
+> Paritok. Wrote it up for them.
+>
+> Repo + live demo + every number traceable to a log row: <repo link>
 
 Attach: screen recording of the dashboard scrubbing turns 1→105 on Arm C
 (fact chips stay green) then switching to Arm B (chips go red by turn 25).

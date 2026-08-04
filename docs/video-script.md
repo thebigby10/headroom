@@ -23,12 +23,20 @@ empty."
 
 **2:00–2:40 — the table, and the honest part.**
 Screen: three-arm table. "Same survival on all three arms — the difference is
-what they remember. Two things I'm not claiming: Headroom doesn't send fewer
-tokens than stock — it deliberately spends window on fidelity. And this run
-used our deterministic fallback compressor and offline mock model — every log
-row says so, and dropping in real keys is two env vars."
+what they remember. The shaded columns are the strict test: a real model asked
+to restate the constraints. Headroom gets 2, then 3, then 4 of 5 — not perfect,
+and I'm showing you that. The other two get zero at every probe, because you
+can't restate what you threw away.
+
+Two things I'm not claiming. Headroom doesn't send fewer tokens — it sends
+almost three times Arm A's, deliberately spending window on fidelity. And the
+compression here is our own fallback, not Paritok's model: their hosted GPU was
+down all weekend, and it fails by returning HTTP 200 with your text unchanged.
+We caught it because we gate on their `gpu_available` flag instead of the status
+code. Every affected log row says `local-fallback`; no number here is credited
+to Paritok."
 
 **2:40–3:00 — close.**
-Screen: repo. "Apache 2.0, built with Paritok's hosted compression API, every
-number on screen traceable to a log row. Repo and instant demo in the
+Screen: repo. "Apache 2.0, every number on screen traceable to a log row —
+including the ones that don't flatter us. Repo and instant demo in the
 description."
