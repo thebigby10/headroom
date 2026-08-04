@@ -71,13 +71,39 @@ Suggested fixes, roughly in order of value:
 3. Put `gpu_available` in the quickstart's first code sample, not just the
    schema. Every client needs this check and it isn't discoverable today.
 
-## Third: `level` semantics are still undocumented
+## Third: two sharp edges on the self-host path you recommend
 
-We could not confirm from the hosted API whether `level` is honored at all —
-the GPU was down for our entire window, so all four levels returned identical
-passthrough. `level: "BANANA"` is also accepted by the schema. Recommend
-rejecting unknown levels and documenting the per-level contract; it's the
-single input any selector depends on.
+Your passthrough message points at `ollama pull paritok/paritok-4b-v1` + `paritok
+proxy`. We took that path. The model pulls fine; `paritok proxy` we could not
+find publicly installable (a link in that message would help). Driving the
+weights directly, two things bit us that will bite everyone:
+
+1. **Through ollama's `/api/generate` the model autocompletes instead of
+   compressing.** Fed 12 lines of log frames it generated frames 12, 13, 14 and
+   kept going to the timeout — 131% of the input, every identifier lost. The
+   model ships ChatML stop tokens and the raw endpoint doesn't apply the
+   template; `/api/chat` behaves correctly. Worth one line in the docs.
+2. **Cold load is ~200s** for the 3.8 GB resident size, which silently blew our
+   first three 300s timeouts. Warm it runs ~55 tok/s. Recommend suggesting a
+   `keep_alive`.
+
+With those handled, `level` clearly *is* honored — on a 556-char input we get
+32% / 24% / 19% for L1/L2/L3, three distinct outputs. But on a realistic
+1330-token input (stack trace + 60 repetitive log lines) it goes non-monotonic:
+
+| Level | Output size | Time | Identifiers preserved |
+|---|---|---|---|
+| L1 | **100%** (no compression) | **84.4s** | 3/3 |
+| L2 | **0.7%** (9 tokens) | 0.7s | **0/3** |
+| L3 | 2% (31 tokens) | 1.4s | 1/3 |
+
+L1 costs 84 seconds to do nothing, and L2 discards the entire content including
+the file path, error code and version pin. If the ladder is meant to be graded,
+this input breaks it. Happy to share the exact sample.
+
+Separately: `level: "BANANA"` is accepted by the schema. Recommend rejecting
+unknown levels and documenting the per-level contract — it's the single input
+any selector depends on.
 
 ## Proposal
 

@@ -108,6 +108,35 @@ claim under test. All three arms compress through the identical backend, so the
 comparison between policies is unaffected; a better compressor moves all three
 arms the same direction.
 
+## Chasing the self-host path
+
+The hosted response names its own remedy, so we took it: pulled
+`paritok/paritok-4b-v1` (2.5 GB, Qwen3-4B Q4_K_M) and wired it into
+`compressor.py` as backend tier 2, between the hosted path and the fallback,
+opt-in via `PARITOK_OLLAMA_MODEL`.
+
+Two things worth passing on to anyone else self-hosting these weights:
+
+- **Use `/api/chat`, not `/api/generate`.** Raw-prompted, the model autocompletes
+  instead of compressing — fed 12 log frames it generated frames 12, 13, 14 and
+  ran until the timeout, returning *131%* of the input with every identifier
+  lost. It ships ChatML stop tokens that the raw endpoint doesn't apply.
+- **Set `keep_alive`.** The cold 3.8 GB load costs ~200s and silently blew our
+  first three timeouts. Warm, it runs at ~55 tok/s.
+
+With that fixed, the probe finally answers the question Checkpoint 0 could not:
+**`level` is honored.** On a 556-char input, L1/L2/L3 return 32% / 24% / 19% of
+the original as three distinct outputs. On a realistic 1330-token input it is
+much worse — L1 returns 100% of the input after 84 seconds, and L2 collapses to
+9 tokens, destroying all three identifiers.
+
+We did **not** move the benchmark onto it, for one reason that outranks the
+erratic quality: this is *our* prompt template against Paritok's weights, not
+Paritok's `paritok proxy` wrapper (which we could not find publicly
+installable). Numbers from it are not Paritok's performance, and publishing them
+as such would be precisely the unearned claim the `gpu_available` gate exists to
+prevent. Full detail in `results/checkpoint0.md` §1.2b.
+
 ## Log integrity
 
 Every number above reads back out of `logs/benchmark.jsonl` (35,430 rows), per the

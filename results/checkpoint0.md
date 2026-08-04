@@ -43,7 +43,7 @@ Status: **key supplied and probed live**, 2026-08-05, via `scripts/checkpoint0_p
 | Question | Answer | Evidence |
 |---|---|---|
 | Key works against `/api/compress`? | **The key is accepted — and that makes things worse, not better.** With no key: HTTP 401. With the real key: **HTTP 200**, `gpu_available: false`, and the input echoed back byte-for-byte. The service says so itself: *"The Paritok compression server is not reachable right now. Requests pass through UNCOMPRESSED. To compress, self-host the open 4B model: `ollama pull paritok/paritok-4b-v1`, then run `paritok proxy`."* | probe run, 2026-08-05 |
-| Does `level` change output? | **Still unresolved — for a new reason.** Not auth this time: the GPU backend is simply down, so L0/L1/L2/L3 all return 4739 chars, 100% of the original, identical. The probe's verdict line printed *"key not accepted by GPU path (passthrough)"*. | `L0..L3: HTTP 200 · gpu_available=False · 4739 chars (100% of original)` |
+| Does `level` change output? | **Not answerable from the hosted path** — the GPU is down, so L0/L1/L2/L3 all return 4739 chars, 100% of the original, identical. **Answered instead from the self-hosted model** (next section): yes, `level` produces distinct output — but erratically. | `L0..L3: HTTP 200 · gpu_available=False · 4739 chars (100% of original)` |
 | Was the fake-success guard needed? | **Yes, and this is the proof.** The earlier note said "check `gpu_available`, never just 2xx" as a precaution. That precaution is now the only thing standing between this project and a benchmark that silently measured nothing. | `compressor.py` requires `status < 300 and gpu_available and compressed` |
 
 ## 1.3 Contingency decision (adopted preemptively)
@@ -56,6 +56,59 @@ L1/L2/L3 into "compressed". The local fallback compressor implements distinct
 L1/L2/L3 behaviour deterministically, so the adaptive-vs-fixed comparison is
 measurable today and honestly labeled as running on the fallback.
 
+## 1.2b Taking the self-host path the hosted service recommends
+
+The 200-but-uncompressed response names its own remedy: `ollama pull
+paritok/paritok-4b-v1`, then `paritok proxy`. We pulled the model (2.5 GB, a
+Qwen3-4B at Q4_K_M with a 262k context). `paritok proxy` is not publicly
+installable that we could find, so we drove the weights directly. Probe:
+`scripts/paritok_local_probe.py`.
+
+**First attempt failed instructively.** Driven through ollama's `/api/generate`
+with a raw prompt, the model *autocompletes* rather than compresses — fed 12
+lines of log frames it cheerfully generated frames 12, 13, 14… and kept going
+until the timeout, returning 131% of the input with 0/3 identifiers preserved.
+The model ships ChatML stop tokens; the raw endpoint doesn't apply the template.
+Through `/api/chat` it behaves. Anyone self-hosting these weights will hit this.
+
+**On a small input (556 chars) it looks great:**
+
+| Level | Output | Time | Identifiers kept |
+|---|---|---|---|
+| L1 | 32% of original | 1.9s | 3/3 |
+| L2 | 24% | 1.4s | 2/3 |
+| L3 | 19% | 1.3s | 2/3 |
+
+Three distinct outputs, monotonically smaller. **`level` is honored.** That is
+the answer Checkpoint 0 has been missing since hour zero.
+
+**On a realistic input (1330 tokens of stack trace + 60 repetitive log frames)
+it falls apart:**
+
+| Level | Output | Time | Identifiers kept |
+|---|---|---|---|
+| L1 | **100%** of original (no compression) | **84.4s** | 3/3 |
+| L2 | **0.7%** — 9 tokens | 0.7s | **0/3** |
+| L3 | 2% — 31 tokens | 1.4s | 1/3 |
+
+Non-monotonic and unusable as a graded ladder: L1 does nothing while costing 84
+seconds, and L2 discards the entire content including all three identifiers —
+the exact failure Headroom exists to prevent.
+
+**Decision: the benchmark stays on the local fallback.** Two reasons, and the
+second is the one that decides it:
+
+1. Erratic output would make the arms measure compressor pathology instead of
+   policy, and 84s×~950 compressions is hours of runtime.
+2. **It would be misattribution.** This is our own prompt template against
+   Paritok's weights, not Paritok's `paritok proxy`. Numbers produced this way
+   are not Paritok's performance and must not be reported as such. Publishing
+   them under Paritok's name would be exactly the kind of unearned claim the
+   `gpu_available` gate exists to prevent.
+
+The probe stands as a capability finding — `level` works — not as a benchmark
+backend.
+
 ## 1.4 Sign-off
 
 - [x] Every §1.1 / §1.2 box answered in writing above
@@ -64,6 +117,9 @@ measurable today and honestly labeled as running on the fallback.
 - [x] Decision: **build as designed**, hosted paths behind env keys, fallback labeled
 - [x] **Re-verified against real keys 2026-08-05** — SleepyAI confirmed on every
       documented field; Paritok hosted GPU confirmed **down**, guard caught it
+- [x] **The `level` question is finally closed** — answered off the self-hosted
+      model since the hosted GPU couldn't: `level` is honored, but erratically
+      on realistic input (§1.2b). Benchmark deliberately not moved onto it.
 
 **Verdict: proceed to H1–3 (proxy skeleton + logging).**
 
