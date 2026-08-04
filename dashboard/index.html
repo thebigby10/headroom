@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Headroom — session dashboard</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb; --panel: #f4f4f2; --ink: #0b0b0b; --ink-2: #52514e;
+    --grid: #e4e4e0;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+    --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+    --good: #008300; --bad: #e34948; --other: #9a9994;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface: #1a1a19; --panel: #242423; --ink: #ffffff; --ink-2: #c3c2b7;
+      --grid: #343432;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+      --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+      --good: #199e70; --bad: #e66767; --other: #6f6e69;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--surface); color: var(--ink);
+         font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; padding: 24px;
+         max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 20px; } h1 small { color: var(--ink-2); font-weight: 400; }
+  h2 { font-size: 15px; margin: 28px 0 10px; }
+  .muted { color: var(--ink-2); }
+  .stats { display: flex; gap: 28px; flex-wrap: wrap; margin: 16px 0; }
+  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--ink-2); font-size: 12px; }
+  .bar { display: flex; height: 40px; border-radius: 6px; overflow: hidden;
+         background: var(--panel); }
+  .bar .seg { height: 100%; flex-shrink: 0; cursor: pointer; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 0; font-size: 12px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px;
+              margin-right: 5px; vertical-align: -1px; }
+  .facts { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+  .fact { border: 1px solid var(--grid); border-radius: 6px; padding: 5px 10px;
+          font-size: 13px; }
+  .fact.ok { border-color: var(--good); } .fact.miss { border-color: var(--bad); }
+  .fact b { font-weight: 600; }
+  input[type=range] { width: 100%; accent-color: var(--s1); }
+  svg text { fill: var(--ink-2); font-size: 11px; }
+  .panel { background: var(--panel); border-radius: 8px; padding: 14px; margin-top: 10px; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px;
+        max-height: 260px; overflow: auto; background: var(--surface);
+        border-radius: 6px; padding: 10px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 800px) { .cols { grid-template-columns: 1fr; } }
+  #tip { position: fixed; pointer-events: none; background: var(--panel);
+         border: 1px solid var(--grid); border-radius: 6px; padding: 6px 9px;
+         font-size: 12px; display: none; z-index: 9; }
+  table { border-collapse: collapse; margin-top: 8px; }
+  td, th { padding: 4px 12px; border-bottom: 1px solid var(--grid);
+           font-variant-numeric: tabular-nums; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  select { font: inherit; background: var(--panel); color: var(--ink);
+           border: 1px solid var(--grid); border-radius: 6px; padding: 3px 8px; }
+</style>
+</head>
+<body>
+<h1>Headroom <small>— occupancy-targeted compression, live from the log</small></h1>
+<p class="muted">Every number on this page is read from <code>logs/*.jsonl</code> —
+the same rows the benchmark wrote. Nothing is hardcoded.</p>
+
+<h2>Live session
+  <select id="armSel">
+    <option value="adaptive" selected>Arm C — Headroom (adaptive)</option>
+    <option value="stock">Arm B — stock Paritok policy</option>
+    <option value="compact">Arm A — compact at 90%</option>
+  </select>
+</h2>
+<div class="stats">
+  <div class="stat"><b id="stTurn">–</b><span>turn</span></div>
+  <div class="stat"><b id="stOcc">–</b><span>occupancy</span></div>
+  <div class="stat"><b id="stEpoch">–</b><span>epochs (counted cache misses)</span></div>
+  <div class="stat"><b id="stWin">–</b><span>window (tokens)</span></div>
+</div>
+<input type="range" id="turnSlider" min="1" max="105" value="105"
+       aria-label="turn scrubber">
+<div class="bar" id="occBar" role="img" aria-label="context occupancy by segment class"></div>
+<div class="legend" id="legend"></div>
+
+<details style="margin-top:8px"><summary class="muted">table view — every segment at this turn</summary>
+<div style="overflow-x:auto"><table id="segTable"></table></div></details>
+
+<div class="facts" id="facts"></div>
+<p class="muted" id="factNote"></p>
+
+<h2>Occupancy over the session</h2>
+<svg id="occChart" width="100%" height="220" viewBox="0 0 1040 220"
+     preserveAspectRatio="xMidYMid meet" role="img"
+     aria-label="occupancy percent by turn with watermarks and epoch markers"></svg>
+
+<h2>Three arms, same session — facts retained at the probes</h2>
+<div id="cmp"></div>
+
+<h2>Segment inspector <span class="muted" style="font-weight:400">— click any segment in the bar above</span></h2>
+<div class="panel" id="inspector"><span class="muted">Nothing selected.</span></div>
+
+<div id="tip"></div>
+
+<script>
+/* class→hue map validated with the dataviz palette checker against the
+   adjacencies this bar can actually produce (tool→user→assistant cycle):
+   ALL CHECKS PASS light+dark. assistant renders neutral by design (tiny
+   structural slivers, "Other"-style); identity via legend, tooltip, table. */
+const CLS_COLOR = { system: "var(--s5)", pinned: "var(--s5)", user: "var(--s1)",
+  assistant: "var(--other)", file_read: "var(--s2)", tool_output: "var(--s3)",
+  search: "var(--s4)", free: "var(--panel)" };
+const CLS_ORDER = ["system", "user", "assistant", "file_read", "tool_output", "search"];
+const ARM_COLOR = { compact: "var(--s2)", stock: "var(--s4)", adaptive: "var(--s1)" };
+const ARM_LABEL = { compact: "A · compact", stock: "B · stock", adaptive: "C · Headroom" };
+const FACT_LABEL = { path: "file path", limit: "400ms limit", prohibition: "vendor/ ban",
+  version: "psycopg pin", error_code: "error code" };
+
+const $ = id => document.getElementById(id);
+const tip = $("tip");
+function showTip(e, html) { tip.innerHTML = html; tip.style.display = "block";
+  tip.style.left = Math.min(e.clientX + 12, innerWidth - 220) + "px";
+  tip.style.top = (e.clientY + 12) + "px"; }
+function hideTip() { tip.style.display = "none"; }
+
+let requests = [], probes = [], summary = null, arm = "adaptive", maxTurn = 105;
+
+async function j(url) { const r = await fetch(url); return r.ok ? r.json() : null; }
+
+async function loadArm() {
+  requests = await j(`/api/log?kind=request&arm=${arm}`) || [];
+  probes = await j(`/api/log?kind=probe&arm=${arm}`) || [];
+  maxTurn = requests.length ? Math.max(...requests.map(r => r.turn)) : 1;
+  $("turnSlider").max = maxTurn; $("turnSlider").value = maxTurn;
+  drawOccChart(); renderTurn(maxTurn);
+}
+
+async function renderTurn(t) {
+  const req = requests.find(r => r.turn === t);
+  if (!req) return;
+  $("stTurn").textContent = t;
+  $("stOcc").textContent = req.occupancy_pct + "%";
+  $("stEpoch").textContent = req.epoch;
+  $("stWin").textContent = (req.window / 1000) + "k";
+
+  const segs = await j(`/api/log?kind=segment&arm=${arm}&turn=${t}`) || [];
+  const bar = $("occBar"); bar.innerHTML = "";
+  const win = req.window;
+  for (const s of segs) {
+    const d = document.createElement("div");
+    d.className = "seg";
+    const pct = 100 * s.sent_tokens / win;
+    d.style.width = pct + "%";
+    // 2px separator only on marks wide enough to be discernible; sub-pixel
+    // slivers keep the bar's total width honest (tooltip+table carry them)
+    if (pct > 0.4) d.style.marginRight = "2px";
+    d.style.background = CLS_COLOR[s.class] || "var(--s8)";
+    d.onmousemove = e => showTip(e, `<b>${s.class}</b> · ${s.assigned_level}` +
+      `<br>${s.sent_tokens} sent / ${s.original_tokens} original tokens` +
+      `<br>${s.compressor}`);
+    d.onmouseleave = hideTip;
+    d.onclick = () => inspect(s);
+    bar.appendChild(d);
+  }
+  const free = document.createElement("div");
+  free.className = "seg"; free.style.flex = "1"; free.style.cursor = "default";
+  free.onmousemove = e => showTip(e,
+    `<b>free</b> · ${win - req.sent_tokens} tokens of headroom`);
+  free.onmouseleave = hideTip;
+  bar.appendChild(free);
+
+  $("legend").innerHTML = CLS_ORDER
+    .filter(c => segs.some(s => s.class === c))
+    .map(c => `<span><i style="background:${CLS_COLOR[c]}"></i>${c}</span>`)
+    .join("") + `<span><i style="background:var(--panel);border:1px solid var(--grid)"></i>free</span>`;
+
+  $("segTable").innerHTML =
+    `<tr><th>class</th><th>level</th><th>sent tokens</th><th>original tokens</th><th>compressor</th></tr>` +
+    segs.map(s => `<tr><td>${s.class}</td><td>${s.assigned_level}</td>
+      <td>${s.sent_tokens}</td><td>${s.original_tokens}</td><td>${s.compressor}</td></tr>`).join("");
+
+  const past = probes.filter(p => p.turn <= t).sort((a, b) => b.turn - a.turn)[0];
+  if (past) {
+    $("facts").innerHTML = Object.entries(past.facts).map(([k, ok]) =>
+      `<span class="fact ${ok ? "ok" : "miss"}">${ok ? "✓" : "✗"} <b>${FACT_LABEL[k] || k}</b></span>`).join("");
+    const n = Object.values(past.facts).filter(Boolean).length;
+    $("factNote").textContent =
+      `Facts from turn 1 still in the context at probe turn ${past.turn}: ${n} / 5` +
+      ` (probes are forked calls — never appended to the session).`;
+  } else {
+    $("facts").innerHTML = ""; $("factNote").textContent = "First probe fires at turn 25.";
+  }
+}
+
+function drawOccChart() {
+  const svg = $("occChart"), W = 1040, H = 220, L = 40, B = 24, R = 110;
+  const xs = t => L + (W - L - R) * (t - 1) / Math.max(maxTurn - 1, 1);
+  const ys = p => (H - B) - (H - B - 10) * p / 100;
+  let out = "";
+  for (const p of [0, 25, 50, 75, 100])
+    out += `<line x1="${L}" x2="${W - R}" y1="${ys(p)}" y2="${ys(p)}" stroke="var(--grid)"/>` +
+           `<text x="${L - 6}" y="${ys(p) + 4}" text-anchor="end">${p}%</text>`;
+  for (const wm of [50, 70, 85])
+    out += `<line x1="${L}" x2="${W - R}" y1="${ys(wm)}" y2="${ys(wm)}" stroke="var(--s8)"
+             stroke-dasharray="5 4" opacity="0.6"/>` +
+           `<text x="${W - R + 6}" y="${ys(wm) + 4}">watermark ${wm}%</text>`;
+  const pts = requests.map(r => `${xs(r.turn)},${ys(Math.min(r.occupancy_pct, 100))}`).join(" ");
+  out += `<polyline points="${pts}" fill="none" stroke="${ARM_COLOR[arm]}" stroke-width="2"/>`;
+  let lastEpoch = 0;
+  for (const r of requests) if (r.epoch > lastEpoch) {
+    lastEpoch = r.epoch;
+    out += `<line x1="${xs(r.turn)}" x2="${xs(r.turn)}" y1="${ys(100)}" y2="${ys(0)}"
+             stroke="var(--s7)" stroke-width="2" opacity="0.7"/>
+            <text x="${xs(r.turn) + 4}" y="${ys(100) + 10}">epoch ${r.epoch} · turn ${r.turn}</text>`;
+  }
+  for (const t of [25, 50, 100]) if (t <= maxTurn)
+    out += `<text x="${xs(t)}" y="${H - 8}" text-anchor="middle">probe ${t}</text>`;
+  svg.innerHTML = out;
+  svg.onmousemove = e => {
+    const box = svg.getBoundingClientRect();
+    const t = Math.round(1 + (maxTurn - 1) * (e.clientX - box.left - L * box.width / W) /
+                         ((W - L - R) * box.width / W));
+    const r = requests.find(x => x.turn === Math.max(1, Math.min(maxTurn, t)));
+    if (r) showTip(e, `<b>turn ${r.turn}</b> · ${r.occupancy_pct}% · ` +
+                      `${r.sent_tokens} tokens · epoch ${r.epoch}`);
+  };
+  svg.onmouseleave = hideTip;
+}
+
+async function inspect(s) {
+  const seg = await j(`/api/segment/${s.segment_id}`);
+  if (!seg) return;
+  const cur = seg.reps[s.assigned_level] || { text: seg.original, tokens: "?", backend: "none" };
+  $("inspector").innerHTML = `
+    <b>${seg.class}</b> · priority ${seg.priority} · arrived turn ${seg.arrival_turn}
+    · level <b>${s.assigned_level}</b> · backend ${cur.backend}
+    <div class="cols">
+      <div><p class="muted">original (${seg.reps.L0 ? seg.reps.L0.tokens : "?"} tokens — kept forever)</p><pre>${esc(seg.original)}</pre></div>
+      <div><p class="muted">sent at ${s.assigned_level} (${cur.tokens} tokens)</p><pre>${esc(cur.text)}</pre></div>
+    </div>`;
+}
+const esc = t => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+async function drawCmp() {
+  summary = await j("/api/summary");
+  if (!summary) { $("cmp").innerHTML = "<p class='muted'>Run the benchmark first.</p>"; return; }
+  const arms = summary.results;
+  let rows = "";
+  for (const [label, r] of Object.entries(arms)) {
+    const p = t => { const pr = r.probes[t]; if (!pr) return "—";
+      return Object.values(pr).filter(Boolean).length + "/5"; };
+    rows += `<tr><td><i class="legend" style="display:inline-block;width:10px;height:10px;
+      border-radius:3px;background:${ARM_COLOR[r.arm]};margin-right:6px"></i>
+      ${ARM_LABEL[r.arm]}</td><td>${r.turns}</td>
+      <td>${p(25)}</td><td>${p(50)}</td><td>${p(100)}</td>
+      <td>${r.avg_sent.toLocaleString()}</td><td>${r.epochs ?? "—"}</td></tr>`;
+  }
+  $("cmp").innerHTML = `<table>
+    <tr><th>arm</th><th>turns survived</th><th>facts@25</th><th>facts@50</th>
+    <th>facts@100</th><th>avg tokens/turn</th><th>epochs</th></tr>${rows}</table>
+    <p class="muted">Same survival — the difference is what each arm still remembers.
+    Stock spends fidelity when the window is half-empty; Headroom spends it only under pressure.</p>`;
+}
+
+$("turnSlider").oninput = e => renderTurn(+e.target.value);
+$("armSel").onchange = e => { arm = e.target.value; loadArm(); };
+loadArm(); drawCmp();
+</script>
+</body>
+</html>

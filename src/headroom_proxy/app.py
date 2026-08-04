@@ -57,7 +57,7 @@ async def chat_completions(req: Request):
 
 
 @app.get("/api/log")
-def api_log(session: str = None, arm: str = None, kind: str = None):
+def api_log(session: str = None, arm: str = None, kind: str = None, turn: int = None):
     rows = log.read_all()
     if session:
         rows = [r for r in rows if r.get("session") == session]
@@ -65,7 +65,18 @@ def api_log(session: str = None, arm: str = None, kind: str = None):
         rows = [r for r in rows if r.get("arm") == arm]
     if kind:
         rows = [r for r in rows if r.get("kind") == kind]
+    if turn is not None:
+        rows = [r for r in rows if r.get("turn") == turn]
     return rows
+
+
+@app.get("/api/summary")
+def api_summary():
+    import json
+    path = "logs/benchmark_summary.json"
+    if os.path.exists(path):
+        return json.load(open(path))
+    return JSONResponse({"error": "no benchmark run yet"}, status_code=404)
 
 
 @app.get("/api/segment/{sid}")
