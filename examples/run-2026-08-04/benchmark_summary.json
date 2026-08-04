@@ -1,0 +1,112 @@
+{
+  "window": 32000,
+  "n_turns": 105,
+  "facts": {
+    "path": "src/adapters/legacy_parser.py",
+    "limit": "response must stay under 400ms",
+    "prohibition": "do not modify anything under vendor/",
+    "version": "psycopg 2.9.3",
+    "error_code": "E_CONN_4471"
+  },
+  "results": {
+    "A": {
+      "arm": "compact",
+      "probes": {
+        "25": {
+          "path": false,
+          "limit": false,
+          "prohibition": false,
+          "version": false,
+          "error_code": false
+        },
+        "50": {
+          "path": false,
+          "limit": false,
+          "prohibition": false,
+          "version": false,
+          "error_code": false
+        },
+        "100": {
+          "path": false,
+          "limit": false,
+          "prohibition": false,
+          "version": false,
+          "error_code": false
+        }
+      },
+      "died_at": null,
+      "cum_sent": 592899,
+      "turns": 105,
+      "epochs": 0,
+      "avg_sent": 5647,
+      "peak_occupancy_pct": 88.6,
+      "cache_stable_total": 243183
+    },
+    "B": {
+      "arm": "stock",
+      "probes": {
+        "25": {
+          "path": false,
+          "limit": false,
+          "prohibition": false,
+          "version": false,
+          "error_code": false
+        },
+        "50": {
+          "path": false,
+          "limit": false,
+          "prohibition": false,
+          "version": false,
+          "error_code": false
+        },
+        "100": {
+          "path": false,
+          "limit": false,
+          "prohibition": false,
+          "version": false,
+          "error_code": false
+        }
+      },
+      "died_at": null,
+      "cum_sent": 827009,
+      "turns": 105,
+      "epochs": 0,
+      "avg_sent": 7876,
+      "peak_occupancy_pct": 43.9,
+      "cache_stable_total": 456827
+    },
+    "C": {
+      "arm": "adaptive",
+      "probes": {
+        "25": {
+          "path": true,
+          "limit": true,
+          "prohibition": true,
+          "version": true,
+          "error_code": true
+        },
+        "50": {
+          "path": true,
+          "limit": true,
+          "prohibition": true,
+          "version": true,
+          "error_code": true
+        },
+        "100": {
+          "path": true,
+          "limit": true,
+          "prohibition": true,
+          "version": true,
+          "error_code": true
+        }
+      },
+      "died_at": null,
+      "cum_sent": 1728697,
+      "turns": 105,
+      "epochs": 1,
+      "avg_sent": 16464,
+      "peak_occupancy_pct": 79.6,
+      "cache_stable_total": 1367338
+    }
+  }
+}

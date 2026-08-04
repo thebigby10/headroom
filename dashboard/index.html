@@ -23,6 +23,14 @@
       --good: #199e70; --bad: #e66767; --other: #6f6e69;
     }
   }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface: #1a1a19; --panel: #242423; --ink: #ffffff; --ink-2: #c3c2b7;
+    --grid: #343432;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    --good: #199e70; --bad: #e66767; --other: #6f6e69;
+  }
   * { box-sizing: border-box; margin: 0; }
   body { background: var(--surface); color: var(--ink);
          font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; padding: 24px;
@@ -128,7 +136,23 @@ function hideTip() { tip.style.display = "none"; }
 
 let requests = [], probes = [], summary = null, arm = "adaptive", maxTurn = 105;
 
-async function j(url) { const r = await fetch(url); return r.ok ? r.json() : null; }
+/* offline mode: examples/demo.html inlines window.HEADROOM_DATA so the whole
+   dashboard works from a static file — same code paths, same log rows */
+async function j(url) {
+  const d = window.HEADROOM_DATA;
+  if (d) {
+    if (url.startsWith("/api/summary")) return d.summary;
+    if (url.startsWith("/api/segment/")) return d.segments[url.split("/").pop()] || null;
+    const p = new URLSearchParams(url.split("?")[1]);
+    return d.log.filter(r =>
+      (!p.get("kind") || r.kind === p.get("kind")) &&
+      (!p.get("arm") || r.arm === p.get("arm")) &&
+      (!p.get("turn") || r.turn === +p.get("turn")));
+  }
+  const r = await fetch(url); return r.ok ? r.json() : null;
+}
+if (window.HEADROOM_DATA) addEventListener("DOMContentLoaded",
+  () => { $("turnSlider").step = 5; });
 
 async function loadArm() {
   requests = await j(`/api/log?kind=request&arm=${arm}`) || [];
