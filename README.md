@@ -47,8 +47,16 @@ pressing. Full details and verdict: [`results/checkpoint1.md`](results/checkpoin
 > down — it returns HTTP 200 with `gpu_available: false` and your text echoed back
 > unchanged at every level. Headroom detects this and falls back to its own
 > deterministic compressor, stamping `compressor=local-fallback` on every affected
-> log row. **No number above is attributed to Paritok.** See
-> [`results/checkpoint0.md`](results/checkpoint0.md).
+> log row. **No number above is attributed to Paritok.**
+>
+> We also pulled Paritok's open 4B model, which their passthrough message
+> recommends self-hosting, and confirmed off it that `level` *is* honored —
+> 32% / 24% / 19% for L1/L2/L3 on a small input. We deliberately did **not** run
+> the benchmark on it: on realistic input it goes non-monotonic (L1 returns 100%
+> of the input after 84s; L2 collapses to 9 tokens, losing every identifier), and
+> more importantly it is our own prompt template against their weights rather than
+> their `paritok proxy` — so its numbers are not Paritok's performance and won't
+> be reported as if they were. See [`results/checkpoint0.md`](results/checkpoint0.md).
 
 ![dashboard](docs/dashboard.png)
 
