@@ -23,17 +23,32 @@ and the last two turns stay byte-identical, always.
 Three arms, one scripted 105-turn debugging session, five facts planted
 mid-briefing in turns 1–3, forked probes at turns 25/50/100, exact-substring
 scoring (no LLM grader). One command: `.venv/bin/python benchmark/run.py`.
+Upstream is a real model — SleepyAI `laguna-s-2.1`, 326 live calls.
 
-| Arm | Policy | Turns survived | Facts@25 | Facts@50 | Facts@100 | Avg tokens/turn | Epochs |
+| Arm | Policy | Turns survived | Facts in context @25/50/100 | Model restated them @25/50/100 | Avg tokens/turn | Peak occupancy | Epochs |
 |---|---|---|---|---|---|---|---|
-| A | direct + compact-at-90% | 105 | 0/5 | 0/5 | 0/5 | 5,647 | — |
-| B | stock Paritok policy (tool L1 / history L3) | 105 | 0/5 | 0/5 | 0/5 | 7,876 | — |
-| C | **Headroom** | 105 | **5/5** | **5/5** | **5/5** | 16,464 | **1** |
+| A | direct + compact-at-90% | 105 | 0/5 · 0/5 · 0/5 | 0/5 · 0/5 · 0/5 | 5,647 | 88.6% | — |
+| B | stock Paritok policy (tool L1 / history L3) | 105 | 0/5 · 0/5 · 0/5 | 0/5 · 0/5 · 0/5 | 7,876 | 43.9% | — |
+| C | **Headroom** | 105 | **5/5 · 5/5 · 5/5** | **2/5 · 3/5 · 4/5** | 16,464 | 79.6% | **1** |
 
-Same survival — the difference is what each arm still remembers. Note what
-Headroom does **not** win: tokens. Stock sends less than half as much. Headroom
-deliberately spends window it has on fidelity it can keep. Full details and
-verdict: [`results/checkpoint1.md`](results/checkpoint1.md).
+Same survival — the difference is what each arm still remembers. The second
+scoring column is the strict one: a forked call asking the live model to restate
+the constraints, graded on its actual reply. Headroom is the only arm that scores
+on it at all, and it is honestly short of 5/5 — holding a fact in context does not
+guarantee the model uses it.
+
+Note what Headroom does **not** win: tokens. It sends ~2.9× Arm A and ~2.1× Arm B
+per turn, and this table does not claim otherwise. The number that indicts fixed
+policy is Arm B's **43.9% peak occupancy** — it destroyed all five facts while
+leaving more than half the window unused. It compressed hard when nothing was
+pressing. Full details and verdict: [`results/checkpoint1.md`](results/checkpoint1.md).
+
+> **Disclosure:** a real Paritok key was supplied and probed. The hosted GPU is
+> down — it returns HTTP 200 with `gpu_available: false` and your text echoed back
+> unchanged at every level. Headroom detects this and falls back to its own
+> deterministic compressor, stamping `compressor=local-fallback` on every affected
+> log row. **No number above is attributed to Paritok.** See
+> [`results/checkpoint0.md`](results/checkpoint0.md).
 
 ![dashboard](docs/dashboard.png)
 
