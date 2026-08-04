@@ -32,20 +32,64 @@ def probe(rendered: list[dict]) -> dict:
     return {name: (fact in ctx) for name, fact in FACTS.items()}
 
 
+def call_upstream(messages, sess, max_tokens=128, tag="turn"):
+    """One real POST with honest logging; 429s back off, errors don't kill the run."""
+    for attempt in range(4):
+        t0 = time.time()
+        try:
+            resp = upstream.chat(messages, max_tokens=max_tokens)
+            usage = resp.get("usage", {})
+            log.write({"kind": "upstream", "session": sess.id, "arm": sess.arm,
+                       "turn": sess.turn, "tag": tag,
+                       "latency_ms": round(1000 * (time.time() - t0)),
+                       "upstream": upstream.name(), "model": resp.get("model"),
+                       "provider_prompt_tokens": usage.get("prompt_tokens"),
+                       "provider_cached_tokens": usage.get("prompt_tokens_details", {}).get("cached_tokens")})
+            return resp
+        except Exception as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            log.write({"kind": "upstream_error", "session": sess.id, "arm": sess.arm,
+                       "turn": sess.turn, "tag": tag, "status": status,
+                       "error": str(e)[:200], "attempt": attempt})
+            if status in (429, 502, 503):  # rate limit / upstream blip: back off
+                time.sleep(5 * (attempt + 1))
+            else:
+                return None
+    return None
+
+
+def probe_model(rendered, sess):
+    """The plan's §4.3 protocol, live: FORKED call (copy, never appended) asking
+    the model to restate the constraints; exact-match scored on its reply."""
+    if upstream.name() == "mock":
+        return None
+    resp = call_upstream(rendered + [{"role": "user", "content": PROBE_QUESTION}],
+                         sess, max_tokens=512, tag="probe")
+    if not resp:
+        return None
+    reply = resp["choices"][0]["message"]["content"] or ""
+    return {name: (fact in reply) for name, fact in FACTS.items()}
+
+
 def run_arm(arm: str) -> dict:
     sess = controller.Session(id=f"bench-{arm}", arm=arm, window=WINDOW)
     result = {"arm": arm, "probes": {}, "died_at": None, "cum_sent": 0, "turns": 0}
     for t, msgs in build_transcript(N_TURNS):
         rendered = controller.handle(sess, msgs, query=msgs[-2]["content"][:400])
-        upstream.chat(rendered)  # the real POST; mock offline, SleepyAI with a key
-        sent = sum(r["sent_tokens"] for r in [])  # totals come from the log, not here
+        call_upstream(rendered, sess)  # the real POST; mock offline, SleepyAI with a key
         result["turns"] = t
         if t in PROBE_TURNS:
             scores = probe(rendered)
+            model_scores = probe_model(rendered, sess)
             result["probes"][t] = scores
+            if model_scores:
+                result.setdefault("probes_model", {})[t] = model_scores
             log.write({"kind": "probe", "session": sess.id, "arm": arm, "turn": t,
                        "epoch": sess.epoch, "facts": scores,
-                       "retained": sum(scores.values()), "question": PROBE_QUESTION})
+                       "retained": sum(scores.values()),
+                       "facts_model_restated": model_scores,
+                       "retained_model": sum(model_scores.values()) if model_scores else None,
+                       "question": PROBE_QUESTION})
         if sess.dead:
             result["died_at"] = t
             break

@@ -11,14 +11,17 @@ import httpx
 from . import tokens
 
 BASE_URL = os.environ.get("SLEEPY_AI_BASE_URL", "https://www.sleepyai.org/api/v1")
+# free tier, 1M context — verified live at checkpoint 0 (see results/checkpoint0.md)
+DEFAULT_MODEL = os.environ.get("HEADROOM_MODEL", "deepseek-v4-flash-0731:free")
 
 
 def name() -> str:
     return "sleepyai" if os.environ.get("SLEEPY_AI_API_KEY") else "mock"
 
 
-def chat(messages: list[dict], model: str = "gpt-4", max_tokens: int = 512) -> dict:
+def chat(messages: list[dict], model: str = None, max_tokens: int = 512) -> dict:
     key = os.environ.get("SLEEPY_AI_API_KEY")
+    model = model or DEFAULT_MODEL
     if key:
         r = httpx.post(
             f"{BASE_URL}/chat/completions",

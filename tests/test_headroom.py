@@ -12,6 +12,11 @@ import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["HEADROOM_LOG"] = tempfile.mkstemp(suffix=".jsonl")[1]
+# tests always run offline against the mock — never burn real credits.
+# import triggers the package's .env loader, so pop keys AFTER it runs.
+import headroom_proxy  # noqa: E402,F401
+os.environ.pop("SLEEPY_AI_API_KEY", None)
+os.environ.pop("PARITOK_API_KEY", None)
 
 import httpx
 

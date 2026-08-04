@@ -47,12 +47,14 @@ async def chat_completions(req: Request):
         outgoing = controller.handle(sess, messages, query)
 
     t0 = time.time()
-    resp = upstream.chat(outgoing, body.get("model", "gpt-4"),
+    resp = upstream.chat(outgoing, body.get("model"),
                          body.get("max_tokens") or 512)
+    usage = resp.get("usage", {})
     log.write({"kind": "upstream", "session": sid, "arm": arm,
                "latency_ms": round(1000 * (time.time() - t0)),
-               "upstream": upstream.name(),
-               "provider_prompt_tokens": resp.get("usage", {}).get("prompt_tokens")})
+               "upstream": upstream.name(), "model": resp.get("model"),
+               "provider_prompt_tokens": usage.get("prompt_tokens"),
+               "provider_cached_tokens": usage.get("prompt_tokens_details", {}).get("cached_tokens")})
     return JSONResponse(resp)
 
 
