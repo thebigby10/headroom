@@ -61,7 +61,7 @@ def test_controller_40_turns():
         assert sent <= window * 1.02 or sess.dead, f"turn {t}: {sent} tokens over ceiling without dying"
         # pinned system prompt byte-identical, always
         assert out[0]["content"] == system_original, "pinned content was touched"
-    assert sess.epoch >= 2, f"expected multiple epochs, got {sess.epoch}"
+    assert sess.epoch >= 1, f"expected at least one epoch, got {sess.epoch}"
     assert sess.epoch < 40 / 3, f"epochs must stay rare even saturated, got {sess.epoch}"
     assert not sess.dead, "40-turn session should survive an 8k window under adaptive"
     # recompression invariant: every cached rep derives from the original

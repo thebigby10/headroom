@@ -44,23 +44,30 @@ def _positional_pinned(segs: list[Segment]) -> set:
 
 
 def _replan(segs, levels, pinned_ids, window, target_ratio, query):
-    """Escalate (priority asc, oldest first), one step per round, until under target."""
-    order = sorted((s for s in segs if not s.pinned and s.id not in pinned_ids),
-                   key=lambda s: (s.priority, s.arrival_turn))
+    """Escalate lowest-priority classes FIRST and fully — a tool output reaches L3
+    before any user turn loses a byte. Within a priority group: one ladder step
+    per round, oldest segments first, stopping the moment we're under target."""
+    eligible = sorted((s for s in segs if not s.pinned and s.id not in pinned_ids),
+                      key=lambda s: (s.priority, s.arrival_turn))
     changed = set()
-    while _occupancy(segs, levels, query) > target_ratio * window:
-        bumped = False
-        for s in order:
-            cur = levels.get(s.id, "L0")
-            i = s.ladder.index(cur) if cur in s.ladder else 0
-            if i + 1 < len(s.ladder):
-                levels[s.id] = s.ladder[i + 1]
-                changed.add(s.id)
-                bumped = True
-                if _occupancy(segs, levels, query) <= target_ratio * window:
-                    return changed
-        if not bumped:
-            return changed  # everything maxed; caller decides survival
+    by_prio: dict[int, list] = {}
+    for s in eligible:
+        by_prio.setdefault(s.priority, []).append(s)
+    for prio in sorted(by_prio):
+        group = by_prio[prio]
+        while _occupancy(segs, levels, query) > target_ratio * window:
+            bumped = False
+            for s in group:
+                cur = levels.get(s.id, "L0")
+                i = s.ladder.index(cur) if cur in s.ladder else 0
+                if i + 1 < len(s.ladder):
+                    levels[s.id] = s.ladder[i + 1]
+                    changed.add(s.id)
+                    bumped = True
+                    if _occupancy(segs, levels, query) <= target_ratio * window:
+                        return changed
+            if not bumped:
+                break  # group exhausted; move to the next priority up
     return changed
 
 
@@ -101,6 +108,22 @@ def handle(sess: Session, messages: list[dict], query: str = "") -> list[dict]:
     sess.turn += 1
     segs = sess.store.ingest(messages, sess.turn)
     pinned_ids = _positional_pinned(segs)
+
+    if sess.arm == "adaptive" and sess.wm_level:
+        # under pressure, new arrivals adopt their class's prevailing level.
+        # They render at the tail (and recent ones are positionally pinned), so
+        # this never rewrites the prefix — it is not an epoch.
+        prevailing: dict[str, str] = {}
+        for s in segs:
+            lvl = sess.levels.get(s.id)
+            if lvl in s.ladder:
+                best = prevailing.get(s.cls, "L0")
+                if s.ladder.index(lvl) > s.ladder.index(best):
+                    prevailing[s.cls] = lvl
+        for s in segs:
+            if (s.arrival_turn == sess.turn and not s.pinned
+                    and s.id not in sess.levels and s.cls in prevailing):
+                sess.levels[s.id] = prevailing[s.cls]
     was_changed: set = set()
 
     if sess.arm == "stock":

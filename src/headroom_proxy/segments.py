@@ -12,9 +12,9 @@ from . import compressor, tokens
 CLASS_TABLE = {
     "system":      (9, ["L0"]),
     "pinned":      (9, ["L0"]),
-    "tool_schema": (3, ["L0", "L1"]),
-    "assistant":   (3, ["L0", "L1"]),
-    "user":        (2, ["L0", "L1", "L2"]),
+    "tool_schema": (4, ["L0", "L1"]),
+    "assistant":   (4, ["L0", "L1"]),
+    "user":        (3, ["L0", "L1", "L2"]),
     "file_read":   (2, ["L0", "L1", "L2"]),
     "search":      (1, ["L0", "L2", "L3"]),
     "tool_output": (1, ["L0", "L1", "L2", "L3"]),
