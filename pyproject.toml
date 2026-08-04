@@ -1,0 +1,14 @@
+[project]
+name = "headroom-proxy"
+version = "0.1.0"
+description = "Occupancy-targeted context compression proxy. Built with Paritok."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "httpx>=0.27",
+]
+
+[tool.setuptools]
+packages = ["headroom_proxy"]
+package-dir = { "" = "src" }
