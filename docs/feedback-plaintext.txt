@@ -1,0 +1,152 @@
+PARITOK HACKATHON FEEDBACK - HEADROOM
+Endpoint tested: POST https://www.paritok.com/api/compress
+Measured 2026-08-04 and 2026-08-05 with a valid key.
+
+
+1. LEVEL IS ACCEPTED AND SILENTLY DISCARDED ON THE HOSTED PATH  (bug)
+
+Same content, same headers, only the level parameter varying:
+
+  L0 -> HTTP 200, gpu_available true, 302 chars out
+  L1 -> HTTP 200, gpu_available true, 289 chars out
+  L2 -> HTTP 200, gpu_available true, 302 chars out
+  L3 -> HTTP 200, gpu_available true, 302 chars out
+
+All four land at about 6% of the original. L0 and L3 are indistinguishable.
+The schema accepts the parameter, nothing warns, nothing errors, and it has no
+observable effect.
+
+For contrast, the same ladder run against your open 4B weights self-hosted:
+L1 gives 32% of original, L2 gives 24%, L3 gives 19%. Monotonic, clearly a
+graded ladder. So hosted and self-hosted disagree about what the same request
+means, and nothing in either response says which semantics are in force.
+
+Why this is the expensive one: it is silent. A client cannot detect it from the
+response - 200, gpu_available true, plausible output - so it builds policy on a
+dial that does not turn. Ours did. Our proxy escalates lowest-priority segments
+up a per-class ladder (L0 to L1 to L2 to L3) when context occupancy crosses a
+watermark, assuming that compressing harder reclaims space. Against the hosted
+path it escalated every eligible segment to the top of its ladder, reclaimed
+nothing, and overflowed a 32k window. Two of three benchmark arms died
+mid-session, at turns 48 and 58 of a 105-turn run, peak occupancy 100.3% and
+101.0%. We only diagnosed it because every log row records which backend
+produced it; a client without that instrumentation would blame its own
+controller.
+
+What we would ask for: honor level on the hosted path to match the self-hosted
+ladder, or reject it with a 400 as unsupported. A discarded parameter is
+strictly worse than an absent one - had it 400'd, we would have designed around
+it in an hour instead of losing a benchmark run to it. Either way, document what
+L1 versus L3 should target, and state whether hosted and self-hosted are meant
+to agree.
+
+
+2. FAILURES ARE RETURNED AS HTTP 200, INCLUDING compressed: ""  (bug)
+
+Two distinct failure modes both return HTTP 200 with a well-formed body. A
+client that trusts the status code cannot tell either from success, and in both
+cases the natural thing to do - write body["compressed"] into your context -
+silently destroys data.
+
+Variant A, GPU unavailable with a valid key. Observed 2026-08-04 through
+2026-08-05; this has since recovered, so it is not reproducible right now. We
+report it because the response envelope is a standing design issue that will
+resurface at the next outage.
+
+  no key     -> HTTP 401, gpu_available false, content echoed
+  valid key  -> HTTP 200, gpu_available false, content echoed back verbatim,
+                identical at every level
+
+The unauthenticated case fails loudly and correctly. The authenticated case -
+the one that matters - fails silently. gpu_available was the only signal that
+anything was wrong.
+
+Variant B, GPU up, empty string returned. Current and reproducible. Some inputs
+come back with an empty string, not a missing field and not an error. All rows
+below measured within minutes of each other, same headers, same body shape:
+
+  real prose from our corpus       1,796 chars in  ->  431 chars out  (works)
+  one sentence repeated 50x        2,050 chars in  ->  "" empty
+  one sentence repeated 150x       6,150 chars in  ->  "" empty
+  random words, 20-word vocab      2,406 chars in  ->  "" empty
+  random words, larger             7,500 chars in  ->  "" empty
+
+Not a length threshold - the 1,796 char input succeeds while the 7,500 char one
+returns empty. It tracks whether the text reads as natural prose. Our guess is
+the model emits an empty completion on degenerate input and that goes out
+unwrapped.
+
+Why this matters: for a compression service this is the worst available failure
+shape, because you cannot distinguish "compressed to nothing" from "we returned
+nothing." Both are 200 with an empty compressed field. A straightforward
+integration - check the status, take the field - writes an empty string into the
+model's context and drops the segment. Nothing surfaces. The agent just gets
+quieter and slightly wrong.
+
+We survived both variants only because we never trusted the status code. We gate
+on gpu_available and treat a falsy compressed field as failure, falling back to
+a local compressor and stamping every log row with which backend produced it. In
+one completed live benchmark that guard fired on 2,314 of 4,800 compression
+calls, 48%, nearly all of them short conversational turns - exactly the segments
+an unprotected client would silently lose.
+
+What we would ask for: return non-2xx when compression did not happen, 503 for
+GPU unavailable and 422 for input not compressible. Or add an explicit status or
+reason field so an empty result as a legitimate outcome is distinguishable from
+failure. Document gpu_available as the health contract - it is currently the
+only reliable signal and it is not obviously load-bearing from the docs; it
+saved us twice and should be stated rather than discovered. And do not echo the
+input back under a field named compressed; that is what makes the outage case
+silent.
+
+
+3. BATCH ENDPOINT, TOKEN COUNTS, RATE-LIMIT HEADERS  (enhancement)
+
+Context compression is inherently a fan-out over many segments, but the API is
+one segment per request with no cost signals in the response.
+
+A batch endpoint is the one that matters. Our workload is one call per segment
+per re-plan. A single 3-arm, 105-turn benchmark issues roughly 4,000 hosted
+compression calls and takes about 30 minutes wall-clock, almost entirely network
+round-trips, each a separate TLS request carrying a few KB. This is not an
+unusual shape - any context-management client compresses N segments at a
+decision point, not one. An endpoint accepting an array and returning results in
+order would collapse thousands of sequential round-trips into tens.
+
+Token counts in the response. The response returns compressed text and nothing
+about its size. For an occupancy-driven controller the token count is the reason
+for the call - we compress specifically to get under a watermark. Today every
+client has to re-tokenize the output locally to learn what it just bought, which
+means guessing your tokenizer and being subtly wrong. Returning input_tokens and
+output_tokens costs you nothing, you already have them, and removes a whole
+class of client-side drift.
+
+Rate-limit headers. We saw no X-RateLimit headers and no Retry-After on any
+response. With a workload issuing thousands of calls there is no way to back off
+intelligently; a client either paces conservatively and wastes time, or hammers
+and hopes.
+
+Smaller gaps worth closing: no documented error taxonomy (which status codes are
+possible and what each means); no stated latency expectation, so we could not
+tell a slow call from a hanging one and picked a 30s timeout arbitrarily; and no
+hosted-versus-self-hosted parity statement, which would have saved us a day.
+
+
+WHAT WORKED, FOR BALANCE
+
+The API surface is minimal and obvious - one POST, four fields, bearer auth. We
+integrated in under an hour with no SDK and no client library.
+
+Compression quality on real prose is genuinely good. 1,796 chars down to 431
+while preserving the answer to the query. Measurably better than our own
+deterministic fallback: on one hosted run the fixed-policy arm retained 3 of 5
+planted facts at turn 25 where our local fallback retained 0 of 5. It is
+semantically smart, it just is not aggressive enough to hold occupancy alone.
+
+gpu_available exists at all. Most services would have returned a bare 200. It is
+the only reason we detected an outage mid-benchmark. Promote it to a documented
+contract rather than removing it.
+
+Open 4B weights. Being able to self-host let us answer the level question
+independently when the hosted path was ambiguous. That is a real differentiator
+and it directly produced two of the three issues above.
