@@ -26,14 +26,45 @@ selector that escalates lowest-priority segments first, only under watermark
 pressure, retained all five facts at identical survival — needing exactly one
 re-plan (one prefix-cache miss) all session.
 
-Caveat we want to be upfront about: our arm ran on a deterministic local
-fallback compressor, not the hosted GPU (see reproducer below); the *mechanism*
-(when to compress what, and how hard) is independent of which compressor
-executes the level.
+<!-- TODO before filing: confirm against the hosted re-run now in flight. -->
+Provenance: these two rows were measured while the hosted GPU was down, so the
+compression itself was executed by our own deterministic fallback, not Paritok.
+The *mechanism* being proposed — when to compress what, and how hard — is
+independent of which compressor executes the level, but we're flagging it
+rather than letting the table imply hosted numbers.
 
-## Second finding, and we think the more urgent one: a valid key + a down GPU returns HTTP 200 with your text unchanged
+## Second finding: the hosted path accepts `level` and ignores it
 
-Reproducer against `https://www.paritok.com/api/compress`:
+With the GPU up and a valid key, all four levels return effectively the same
+output. Same endpoint, same input, only `level` varying:
+
+```
+L0: HTTP 200 · gpu_available=True · 302 chars (6% of original)
+L1: HTTP 200 · gpu_available=True · 289 chars (6% of original)
+L2: HTTP 200 · gpu_available=True · 302 chars (6% of original)
+L3: HTTP 200 · gpu_available=True · 302 chars (6% of original)
+```
+
+L0 and L3 are indistinguishable. This makes the first finding worse rather than
+redundant: a client can't fix fixed-level policy by selecting better levels,
+because selecting a level does nothing on the hosted path. The dial is accepted
+by the schema, wired through the client, and discarded at the server.
+
+For a graded ladder we'd expect L0 to be near-lossless and L3 aggressive. At a
+flat ~6% everything is L3, which is the same fidelity loss the first finding
+describes — just imposed server-side where no client can opt out. Note this
+also means self-hosted and hosted disagree: on the open 4B weights `level` *is*
+honored (32%/24%/19% for L1/L2/L3 — see below), so code tuned against one
+behaves differently on the other.
+
+## Third finding: when the GPU is down, a valid key still returns HTTP 200 with your text unchanged
+
+This one is intermittent — the GPU was down 2026-08-04 through 2026-08-05 and
+has since recovered, so it is not reproducible right now. We're reporting it
+because the failure *envelope* is a standing bug that will resurface at the next
+outage, and it is the kind that ships silently.
+
+Reproducer against `https://www.paritok.com/api/compress`, during the outage:
 
 **Without a key** (2026-08-04) → HTTP **401**, `gpu_available: false`, content
 echoed verbatim. Fine; loud and obvious.
@@ -71,7 +102,34 @@ Suggested fixes, roughly in order of value:
 3. Put `gpu_available` in the quickstart's first code sample, not just the
    schema. Every client needs this check and it isn't discoverable today.
 
-## Third: two sharp edges on the self-host path you recommend
+## Also current and reproducible: HTTP 200 with `compressed: ""`
+
+Same silent-failure shape as the outage above, but happening **today with the
+GPU up**. Some inputs come back `200` / `gpu_available: true` / `compressed: ""`
+— an empty string, not a missing field, not an error.
+
+Measured on 2026-08-05, same endpoint, same headers, identical request body
+shape (`{content, query, kind, level}`), all within minutes of each other:
+
+| input | chars in | `compressed` out |
+|---|---|---|
+| real prose from our corpus | 1,796 | **431** ✅ |
+| one sentence repeated 50× | 2,050 | `""` |
+| one sentence repeated 150× | 6,150 | `""` |
+| random words from a 20-word vocabulary | 2,406 | `""` |
+| random words, larger | 7,500 | `""` |
+
+Not a length threshold — the 1,796-char input succeeds while the 7,500-char one
+returns empty. It tracks whether the text is natural prose. We'd guess the model
+emits an empty completion on degenerate input and that goes out unwrapped.
+
+Why it matters: a client that trusts `200` writes an empty string into its
+context and silently loses the segment. We only caught it because we treat a
+falsy `compressed` as failure and fall back — the same guard that caught the
+outage. An explicit error, or a documented "input not compressible" response,
+would let clients distinguish "compressed to nothing" from "we returned nothing."
+
+## Fourth: two sharp edges on the self-host path you recommend
 
 Your passthrough message points at `ollama pull paritok/paritok-4b-v1` + `paritok
 proxy`. We took that path. The model pulls fine; `paritok proxy` we could not
@@ -112,6 +170,9 @@ any selector depends on.
    only under pressure. Headroom's controller (~150 lines, Apache 2.0) is yours
    to take.
 2. Make GPU-unavailable a non-2xx, or stop echoing the input into `compressed`.
-3. Document hosted `level` semantics.
+3. **Honor `level` on the hosted path**, or reject it as unsupported — a dial
+   that is accepted and discarded is worse than one that isn't offered, because
+   clients build policy on top of it. Failing that, document the per-level
+   contract and reconcile hosted with self-hosted, which disagree today.
 
 Raw logs (every number above traces to a row): `examples/run-2026-08-04/`.
