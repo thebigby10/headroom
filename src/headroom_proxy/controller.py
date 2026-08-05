@@ -35,8 +35,13 @@ class Session:
     dead: bool = False
 
 
-def _occupancy(segs: list[Segment], levels: dict, query: str) -> int:
-    return sum(s.rep(levels.get(s.id, "L0"), query)[1] for s in segs)
+def _occupancy(segs: list[Segment], levels: dict, query: str,
+               pinned_ids: frozenset = frozenset()) -> int:
+    """Must measure exactly what handle() renders. Pinned and positionally-pinned
+    segments go out at L0 no matter what level they were assigned, so counting them
+    at their assigned level under-reports the payload and the watermark never trips."""
+    return sum(s.rep("L0" if (s.pinned or s.id in pinned_ids) else levels.get(s.id, "L0"),
+                     query)[1] for s in segs)
 
 
 def _positional_pinned(segs: list[Segment]) -> set:
@@ -55,7 +60,7 @@ def _replan(segs, levels, pinned_ids, window, target_ratio, query):
         by_prio.setdefault(s.priority, []).append(s)
     for prio in sorted(by_prio):
         group = by_prio[prio]
-        while _occupancy(segs, levels, query) > target_ratio * window:
+        while _occupancy(segs, levels, query, pinned_ids) > target_ratio * window:
             bumped = False
             for s in group:
                 cur = levels.get(s.id, "L0")
@@ -64,7 +69,7 @@ def _replan(segs, levels, pinned_ids, window, target_ratio, query):
                     levels[s.id] = s.ladder[i + 1]
                     changed.add(s.id)
                     bumped = True
-                    if _occupancy(segs, levels, query) <= target_ratio * window:
+                    if _occupancy(segs, levels, query, pinned_ids) <= target_ratio * window:
                         return changed
             if not bumped:
                 break  # group exhausted; move to the next priority up
@@ -74,13 +79,13 @@ def _replan(segs, levels, pinned_ids, window, target_ratio, query):
     # and without a floor the window simply overflows. Evict lowest-priority, oldest
     # first, only after every ladder is exhausted. Upgrade path: summarize-then-evict
     # if dropping these outright costs too much recall.
-    if _occupancy(segs, levels, query) > target_ratio * window:
+    if _occupancy(segs, levels, query, pinned_ids) > target_ratio * window:
         for s in eligible:
             if levels.get(s.id) == "EVICT":
                 continue
             levels[s.id] = "EVICT"
             changed.add(s.id)
-            if _occupancy(segs, levels, query) <= target_ratio * window:
+            if _occupancy(segs, levels, query, pinned_ids) <= target_ratio * window:
                 break
     return changed
 
@@ -145,7 +150,7 @@ def handle(sess: Session, messages: list[dict], query: str = "") -> list[dict]:
         was_changed = {k for k, v in new.items() if sess.levels.get(k, "L0") != v}
         sess.levels = new
     elif sess.arm == "adaptive":
-        occ = _occupancy(segs, sess.levels, query)
+        occ = _occupancy(segs, sess.levels, query, pinned_ids)
         crossed = sum(1 for w in WATERMARKS if occ > w * sess.window)
         # re-plan on crossing a new watermark, and again whenever growth pushes
         # occupancy back above the top watermark
