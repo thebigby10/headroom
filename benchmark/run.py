@@ -134,7 +134,8 @@ def main():
         results[label]["cache_stable_total"] = sum(r["cache_stable_prefix_tokens"] for r in req)
 
     json.dump({"window": WINDOW, "n_turns": N_TURNS, "facts": FACTS,
-               "results": results}, open("logs/benchmark_summary.json", "w"), indent=2)
+               "results": results}, open(os.environ.get("HEADROOM_LOG", "logs/benchmark.jsonl")
+                        .rsplit(".jsonl", 1)[0] + "_summary.json", "w"), indent=2)
     print(json.dumps(results, indent=2))
     return results
 
