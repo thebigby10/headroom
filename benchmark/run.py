@@ -76,7 +76,12 @@ def run_arm(arm: str) -> dict:
     result = {"arm": arm, "probes": {}, "died_at": None, "cum_sent": 0, "turns": 0}
     for t, msgs in build_transcript(N_TURNS):
         rendered = controller.handle(sess, msgs, query=msgs[-2]["content"][:400])
-        call_upstream(rendered, sess)  # the real POST; mock offline, SleepyAI with a key
+        # ponytail: per-turn POSTs prove real upstream traffic but their replies are
+        # discarded — nothing downstream reads them. HEADROOM_TURN_UPSTREAM=off skips
+        # them so the 9 probe calls (where the model's answer IS the measurement) still
+        # get through a rate-limited free tier. Leave it on when the budget allows.
+        if os.environ.get("HEADROOM_TURN_UPSTREAM", "on") != "off":
+            call_upstream(rendered, sess)  # the real POST; mock offline, SleepyAI with a key
         result["turns"] = t
         if t in PROBE_TURNS:
             scores = probe(rendered)

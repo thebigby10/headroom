@@ -2,7 +2,6 @@ PARITOK HACKATHON FEEDBACK - HEADROOM
 Endpoint tested: POST https://www.paritok.com/api/compress
 Measured 2026-08-04 and 2026-08-05 with a valid key.
 
-
 1. LEVEL IS ACCEPTED AND SILENTLY DISCARDED ON THE HOSTED PATH  (bug)
 
 Same content, same headers, only the level parameter varying:
