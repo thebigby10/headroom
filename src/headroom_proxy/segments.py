@@ -52,7 +52,15 @@ class Segment:
 
     def rep(self, level: str, query: str = ""):
         if level not in self.reps:
-            text, backend = compressor.compress(self.original, level, query, self.cls)
+            if level == "EVICT":
+                # ponytail: tombstone, not deletion — keeps message order intact and
+                # tells the model a segment is gone instead of silently rewriting history
+                text, backend = (
+                    f"[{self.cls} from turn {self.arrival_turn} dropped to fit the context window]",
+                    "evicted",
+                )
+            else:
+                text, backend = compressor.compress(self.original, level, query, self.cls)
             self.reps[level] = (text, tokens.count(text), backend)
         return self.reps[level]
 

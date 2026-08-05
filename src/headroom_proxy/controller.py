@@ -68,6 +68,20 @@ def _replan(segs, levels, pinned_ids, window, target_ratio, query):
                         return changed
             if not bumped:
                 break  # group exhausted; move to the next priority up
+
+    # ponytail: the ladder can run out while we're still over target — a compressor
+    # whose levels are a no-op (Paritok's hosted path, 2026-08-05) reclaims nothing,
+    # and without a floor the window simply overflows. Evict lowest-priority, oldest
+    # first, only after every ladder is exhausted. Upgrade path: summarize-then-evict
+    # if dropping these outright costs too much recall.
+    if _occupancy(segs, levels, query) > target_ratio * window:
+        for s in eligible:
+            if levels.get(s.id) == "EVICT":
+                continue
+            levels[s.id] = "EVICT"
+            changed.add(s.id)
+            if _occupancy(segs, levels, query) <= target_ratio * window:
+                break
     return changed
 
 

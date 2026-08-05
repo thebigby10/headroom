@@ -84,7 +84,27 @@ def test_controller_40_turns():
     print(f"PASS controller: 40 turns, {sess.epoch} epochs, occupancy held, pinned intact")
 
 
+def test_survives_noop_compressor():
+    """Paritok's hosted path returned identical output for L0-L3 on 2026-08-05, so
+    escalation reclaims nothing. Without a terminal evict the window just overflows."""
+    from headroom_proxy import compressor
+    original_compress = compressor.compress
+    compressor.compress = lambda text, level, query="", cls="": (text, "noop")
+    try:
+        window = 8000
+        sess = controller.Session(id="tnoop", arm="adaptive", window=window)
+        for t in range(1, 41):
+            out = controller.handle(sess, fake_transcript(t), query=f"turn {t}")
+            sent = sum(tokens.count(m["content"]) for m in out)
+            assert sent <= window * 1.02, f"turn {t}: {sent} tokens over a {window} window"
+        assert not sess.dead, "must survive a compressor whose levels do nothing"
+    finally:
+        compressor.compress = original_compress
+    print("PASS no-op compressor: evicts instead of overflowing the window")
+
+
 if __name__ == "__main__":
     test_passthrough()
     test_controller_40_turns()
+    test_survives_noop_compressor()
     print("ALL PASS")
