@@ -111,16 +111,17 @@ prevailing level at the tail — an append, not a prefix rewrite.
 
 ## Honest limitations
 
-- This run used the **local deterministic fallback compressor** — no Paritok
-  key was available at build time; unauthenticated calls get 401 + passthrough
-  (verified live, see [`results/checkpoint0.md`](results/checkpoint0.md)).
+- This run used the **local deterministic fallback compressor** — a real
+  Paritok key was supplied, but the hosted GPU is down and echoes input back
+  unchanged (verified live, see [`results/checkpoint0.md`](results/checkpoint0.md)).
   Every log row names its `compressor` backend. Hosted L3 is a learned
   summarizer and may retain more than the fallback — Arm B's 0/5 could improve
   with a key; Arm C's 5/5 doesn't depend on the compressor because its early
   user turns are never compressed at all.
-- The upstream was the offline mock (`usage` flagged `estimated`,
-  `tiktoken/cl100k_base` stamped in every row). One task, one seed — a
-  demonstration, not a general law.
+- The upstream was a real model — SleepyAI `laguna-s-2.1`, 326 POSTs, 2 HTTP
+  502s both recovered on retry; `usage.prompt_tokens` present on 324/324
+  successful calls ([`results/step6-real-upstream.md`](results/step6-real-upstream.md)).
+  One task, one seed — a demonstration, not a general law.
 - Retention is measured as exact-substring presence of five planted facts in
   the sent context — what the model *could* see, not what it would repeat.
 - Prompt caching already discounts stable prefixes; Headroom's argument is
